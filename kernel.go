@@ -215,6 +215,10 @@ func prepareSockets(connInfo ConnectionInfo) (SocketGroup, error) {
 // handleShellMsg responds to a message on the shell ROUTER socket.
 func handleShellMsg(ir *classic.Interp, receipt msgReceipt) {
 	switch receipt.Msg.Header.MsgType {
+	case "complete_request":
+		if err := handleCompleteRequest(receipt); err != nil {
+			log.Fatal(err)
+		}
 	case "kernel_info_request":
 		if err := sendKernelInfo(receipt); err != nil {
 			log.Fatal(err)
