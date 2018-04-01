@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,90 @@ func runTest(m *testing.M) int {
 	go runKernel(connectionFile)
 
 	return m.Run()
+}
+
+//==============================================================================
+
+// TestComplete test autocomplete in cells.
+// https://jupyter-client.readthedocs.io/en/latest/messaging.html#completion
+func TestComplete(t *testing.T) {
+	cases := []struct {
+		Input     []string
+		CursorPos int
+		Output    []string
+	}{
+		{
+			[]string{
+				"package main",
+				"import \"container/list\"",
+				"func main() {",
+				"list.",
+				"}",
+			},
+			56,
+			[]string{
+				"New",
+				"Element",
+				"List",
+			},
+		},
+	}
+
+	t.Logf("Should be able to complete valid code in notebook cells.")
+
+	for k, tc := range cases {
+		// Give a progress report.
+		t.Logf("  Autocompleting code snippet %d/%d.", k+1, len(cases))
+
+		// Get the result.
+		result := testComplete(t, strings.Join(tc.Input, "\n"), tc.CursorPos)
+
+		// Compare the result.
+		if !reflect.DeepEqual(result, tc.Output) {
+			t.Errorf("\t%s Test case produced unexpected results. want: %#v got: %#v", failure, tc.Output, result)
+			continue
+		}
+		t.Logf("\t%s Should return the correct autocompletions.", success)
+	}
+}
+
+// testComplete autocompletes a cell.
+func testComplete(t *testing.T, codeIn string, cursorPos int) []string {
+	client, closeClient := newTestJupyterClient(t)
+	defer closeClient()
+
+	// Create a message.
+	request, err := NewMsg("complete_request", ComposedMsg{})
+	if err != nil {
+		t.Fatalf("\t%s NewMsg: %s", failure, err)
+	}
+
+	// Fill in remaining header information.
+	request.Header.Session = sessionID
+	request.Header.Username = "KernelTester"
+
+	// Fill in Metadata.
+	request.Metadata = make(map[string]interface{})
+
+	// Fill in content.
+	content := make(map[string]interface{})
+	content["code"] = codeIn
+	content["cursor_pos"] = cursorPos
+	request.Content = content
+
+	reply, _ := client.performJupyterRequest(t, request, 10*time.Second)
+	assertMsgTypeEquals(t, reply, "complete_reply")
+	content = getMsgContentAsJSONObject(t, reply)
+	status := getString(t, "content", content, "status")
+	if status != "ok" {
+		t.Fatalf("\t%s Execution encountered error [%s]: %s", failure, content["ename"], content["evalue"])
+	}
+
+	var matches []string
+	for _, match := range content["matches"].([]interface{}) {
+		matches = append(matches, match.(string))
+	}
+	return matches
 }
 
 //==============================================================================
